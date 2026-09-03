@@ -101,6 +101,19 @@ const toApiError = (error, fallback = 'Request failed') => {
 }
 
 // ── Row mappers ────────────────────────────────────────────────────────────
+// Two styles on purpose:
+//
+//  * `withUnderscoreId` SPREADS the row. Use it for endpoints whose SQL already
+//    returns the exact camelCase field names the UI reads (admin_list_users
+//    aliases them in SQL). Spreading means a field added later cannot be
+//    silently dropped by an out-of-date whitelist — which is exactly how the
+//    missing-_id bug below survived review in the first place.
+//
+//  * explicit whitelists (`mapProfile`, `mapNotification`, `mapActivity`) are
+//    kept where the SQL returns snake_case that must be renamed; each was
+//    checked field-by-field against every component that reads it.
+const withUnderscoreId = (row) => row && { ...row, _id: row.id }
+
 const mapProfile = (row) => row && ({
   // `_id` keeps the existing UI code working; `id` is also exposed so new code
   // can use the idiomatic name.
@@ -287,7 +300,15 @@ const invokeAdmin = async (payload) => {
 export const adminAPI = {
   getStats:     async ()          => envelope(await rpc('admin_stats')),
   getMetrics:   async (range='7d')=> envelope(await rpc('admin_metrics', { p_range: range })),
-  getUsers:     async ()          => envelope(await rpc('admin_list_users')),
+
+  // admin_list_users aliases every column to camelCase in SQL but returns `id`,
+  // while UserManagement reads `user._id` for its React keys AND as the argument
+  // to adjustPoints/resetPassword. Unmapped, every row key was `undefined` and
+  // both admin actions would have fired with an undefined user id.
+  getUsers:     async ()          => envelope(
+    (await rpc('admin_list_users')).map(withUnderscoreId)
+  ),
+
   getActivities: async (limit)    => envelope(
     (await rpc('admin_activities', { p_limit: limit ?? 20 })).map(mapActivity)
   ),
