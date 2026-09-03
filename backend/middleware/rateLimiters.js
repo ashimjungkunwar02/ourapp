@@ -54,9 +54,20 @@ const gameLimiter = makeLimiter({
 })
 
 // ── Catch-all for the rest of the API ───────────────────────────────────────
+// Sizing note: this budget is PER IP, and limiters key on IP. Many users share
+// one IP behind carrier NAT, a corporate proxy or a university network, so the
+// effective allowance is shared across all of them.
+//
+// The frontend polls on its own (coin status every 30s, notifications every
+// 60s) which is ~45 requests per 15 minutes per idle tab before any gameplay.
+// At 500/15min roughly ten concurrent users behind a single NAT IP would start
+// receiving false 429s, so this is deliberately generous. Tune it against real
+// traffic, and if you deploy behind a proxy make sure `trust proxy` is set
+// (server.js does this when NODE_ENV=production) or every request will appear
+// to come from the proxy and the limit will be shared globally.
 const apiLimiter = makeLimiter({
   windowMs: 15 * 60 * 1000,
-  limit: isProd ? 500 : 5000,
+  limit: isProd ? 3000 : 5000,
   message: 'Too many requests. Please try again later.'
 })
 
