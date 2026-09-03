@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lisa Sweeps — Offline</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: white;
+      font-family: -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .logo {
+      margin-bottom: 2rem;
+    }
+
+    .logo .lisa {
+      color: white;
+      font-size: 3rem;
+      font-weight: 900;
+    }
+
+    .logo .sweeps {
+      color: #4ade80;
+      font-size: 3rem;
+      font-weight: 900;
+    }
+
+    .icon-wrap {
+      width: 120px;
+      height: 120px;
+      background: radial-gradient(
+        circle,
+        rgba(74,222,128,0.15),
+        transparent
+      );
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 2rem;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .icon { font-size: 4rem; }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1);    opacity: 1;   }
+      50%       { transform: scale(1.05); opacity: 0.8; }
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      color: #6b7280;
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+
+    .dots {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      background: #4ade80;
+      border-radius: 50%;
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0);    }
+      50%       { transform: translateY(-12px); }
+    }
+
+    button {
+      background: #22c55e;
+      color: black;
+      border: none;
+      padding: 0.85rem 2rem;
+      border-radius: 0.75rem;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #4ade80; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <span class="lisa">LISA</span>
+    <span class="sweeps"> SWEEPS</span>
+  </div>
+
+  <div class="icon-wrap">
+    <span class="icon">📡</span>
+  </div>
+
+  <h1>Reconnecting to Lisa Sweeps...</h1>
+  <p>
+    You appear to be offline.<br/>
+    Please check your internet connection.
+  </p>
+
+  <div class="dots">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+
+  <button onclick="window.location.reload()">
+    Try Again 🔄
+  </button>
+
+  <script>
+    setInterval(() => {
+      if (navigator.onLine) window.location.reload()
+    }, 5000)
+    window.addEventListener('online', () => window.location.reload())
+  </script>
+</body>
+</html>
