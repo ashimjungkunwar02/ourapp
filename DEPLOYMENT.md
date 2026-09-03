@@ -62,6 +62,7 @@ This applies, in order:
 | `20260903000400_admin_functions.sql` | `admin_stats`, `admin_list_users`, `admin_adjust_points`, `admin_make_it_rain`, `admin_launch_bonus`, `admin_activities`, `admin_metrics` |
 | `20260903000500_realtime.sql` | `supabase_realtime` publication + `prune_live_events` |
 | `20260903000600_seed.sql` | 13 wheel outcomes + `get_wheel_outcomes()` |
+| `20260903000700_fix_admin_metrics_tojsonb.sql` | patch: recreates `admin_metrics` with the `to_jsonb` cast fix |
 
 **If a migration fails**, `supabase db push` stops and tells you which one.
 Fix, then re-run — every migration is written to be idempotent
@@ -371,7 +372,7 @@ on-device with `@capacitor/local-notifications`, so it fires even offline.
 ### 7.1 First: run the automated smoke test
 
 Before clicking through anything, paste **`supabase/verify.sql`** into
-dashboard → SQL Editor → Run. It executes 59 checks against the functions you
+dashboard → SQL Editor → Run. It executes 60 checks against the functions you
 just deployed and prints a PASS/FAIL table plus a one-line verdict.
 
 It works by creating one throwaway `_smoketest` user and setting
@@ -486,6 +487,7 @@ supabase/migrations/20260903000600_seed.sql
 supabase/functions/admin-manage-user/index.ts
 supabase/functions/send-push/index.ts
 supabase/verify.sql                    <- post-deploy smoke test, run this first
+supabase/migrations/20260903000700_fix_admin_metrics_tojsonb.sql
 ```
 
 **New — hosting & app**

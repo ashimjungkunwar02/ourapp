@@ -579,8 +579,8 @@ begin
   v_bonus_chart := public._daily_chart(array['bonus'],                v_days);
 
   v_estimated := v_estimated || to_jsonb(
-    'onlineNow is inferred from last_login within 5 minutes; there is no socket presence')
-    || to_jsonb('fpChart is not backed by a per-day FP series');
+    'onlineNow is inferred from last_login within 5 minutes; there is no socket presence'::text)
+    || to_jsonb('fpChart is not backed by a per-day FP series'::text);
 
   return jsonb_build_object(
     'range',             p_range,

@@ -193,17 +193,28 @@ begin
              v_err = 'COIN_NOT_READY', format('%s (sqlstate %s)', v_err, v_state));
   end;
 
-  -- One coin is not enough to spin: the entry fee is 1 and the balance must
-  -- exceed it, otherwise a spin could drive coins negative.
+  -- A ZERO balance must be refused: the 1-coin entry fee would otherwise drive
+  -- coins negative, which the profiles CHECK constraint forbids anyway.
+  --
+  -- Note a balance of exactly 1 IS allowed to spin and ends at 0 — that is the
+  -- intended rule (`coins < 1` raises), so an earlier version of this test that
+  -- expected a refusal at balance 1 was the bug, not the function.
+  update public.profiles set coins = 0 where id = v_uid;
+
   begin
     v_spin := public.spin_wheel();
-    perform pg_temp.rec('game', 'spin_wheel refuses when the balance is too low', false,
+    perform pg_temp.rec('game', 'spin_wheel refuses a zero balance', false,
              'expected an error, got ' || v_spin::text);
   exception when others then
     get stacked diagnostics v_err = message_text;
-    perform pg_temp.rec('game', 'spin_wheel refuses when the balance is too low',
+    perform pg_temp.rec('game', 'spin_wheel refuses a zero balance',
              v_err = 'INSUFFICIENT_COINS', v_err);
   end;
+
+  -- ...and the refusal must not have charged anything.
+  perform pg_temp.rec('game', 'a refused spin does not charge the entry fee',
+           (select coins from public.profiles where id = v_uid) = 0,
+           'balance is ' || (select coins from public.profiles where id = v_uid));
 
   -- Fund the account the way an admin would, then spin for real.
   update public.profiles set coins = 50 where id = v_uid;
