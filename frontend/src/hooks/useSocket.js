@@ -40,9 +40,15 @@ export const useSocket = ({ onRain, onBonus }) => {
 
       const payload = row.payload ?? {}
 
-      switch (row.event) {
-        case 'make_it_rain':
-          // Shape matches what the CoinRain component already expects.
+      // The column is `kind` and its CHECK constraint allows exactly
+      // 'rain' and 'bonus' (see 20260903000100_schema.sql). An earlier version
+      // switched on `row.event` with cases 'make_it_rain' / 'bonus_launched',
+      // which matched nothing — the discriminator was undefined so every
+      // broadcast fell through to `default` and players saw no rain at all.
+      // The SQL-side smoke test cannot catch this: it never sees the client.
+      switch (row.kind) {
+        case 'rain':
+          // Shape matches what MainLayout/RainEffect already expect.
           onRainRef.current?.({
             amount:    payload.amount    ?? 0,
             adminName: payload.adminName ?? 'Admin',
@@ -50,13 +56,17 @@ export const useSocket = ({ onRain, onBonus }) => {
           })
           break
 
-        case 'bonus_launched':
+        case 'bonus':
+          // BonusBanner reads type / percentage / validHours / message, all of
+          // which admin_launch_bonus puts in the payload. expiresAt is passed
+          // through under both names since the banner may want either.
           onBonusRef.current?.({
             type:       payload.type,
             percentage: payload.percentage,
             validHours: payload.validHours,
             message:    payload.message,
-            endsAt:     payload.endsAt,
+            expiresAt:  payload.expiresAt,
+            endsAt:     payload.expiresAt,
             event:      'bonus_launched'
           })
           break
