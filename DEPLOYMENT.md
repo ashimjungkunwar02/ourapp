@@ -368,6 +368,39 @@ on-device with `@capacitor/local-notifications`, so it fires even offline.
 
 ## 7. Verification checklist
 
+### 7.1 First: run the automated smoke test
+
+Before clicking through anything, paste **`supabase/verify.sql`** into
+dashboard → SQL Editor → Run. It executes 59 checks against the functions you
+just deployed and prints a PASS/FAIL table plus a one-line verdict.
+
+It works by creating one throwaway `_smoketest` user and setting
+`request.jwt.claims` directly, so it exercises `spin_wheel`, `claim_coin`,
+`apply_referral` and the whole admin surface exactly as a logged-in player and
+then an admin would — no browser, no GoTrue password. It deletes the test user
+and its activity rows afterwards, so it leaves nothing behind and is safe to
+re-run.
+
+It deliberately does **not** execute `admin_make_it_rain` or
+`admin_launch_bonus`, because both credit every user by design and would hand
+real coins to your bootstrap admin. Their admin-only gate is tested instead;
+do the live rain check manually in step 7.2 below.
+
+What it covers: migrations landed · RLS on all 6 tables · `live_events` in the
+Realtime publication · 13 seeded wheel outcomes · the `handle_new_user` trigger
+· first coin claim credits exactly 1 · an early second claim raises
+`COIN_NOT_READY` · a spin costs exactly 1 coin and increments `total_spins` ·
+the drawn prize is a real row · `newBalance` matches the stored balance ·
+self-referral and unknown-code rejection · non-admin gets `42501` · RLS hides
+other users' profiles · `admin_metrics` honours both 7d and 30d ranges ·
+`admin_list_users` leaks no password column · every input-validation guard ·
+anonymous calls get `28000`.
+
+If anything FAILS, the `detail` column holds the Postgres error text — send
+that line back.
+
+### 7.2 Then: click through the UI
+
 Run through this once after deploying. Each line is a distinct subsystem.
 
 - [ ] `npm run dev` → login page renders (not the amber setup page)
@@ -452,6 +485,7 @@ supabase/migrations/20260903000500_realtime.sql
 supabase/migrations/20260903000600_seed.sql
 supabase/functions/admin-manage-user/index.ts
 supabase/functions/send-push/index.ts
+supabase/verify.sql                    <- post-deploy smoke test, run this first
 ```
 
 **New — hosting & app**
