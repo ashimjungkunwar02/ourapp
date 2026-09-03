@@ -1,77 +1,72 @@
-require('dotenv').config({ 
-  path: require('path').join(__dirname, '..', '.env') 
-})
+// config/env loads .env and validates required secrets.
+const { MONGODB_URI, requireEnv } = require('../config/env')
 
 const mongoose = require('mongoose')
-const bcrypt   = require('bcryptjs')
 
-// ── Simple User Schema (inline so no import issues) ──────────
-const userSchema = new mongoose.Schema({
-  username:     { type: String, required: true, unique: true },
-  password:     { type: String, required: true },
-  isAdmin:      { type: Boolean, default: false },
-  coins:        { type: Number, default: 0 },
-  streak:       { type: Number, default: 0 },
-  referralCode: { type: String, default: () => Math.random().toString(36).slice(2, 10).toUpperCase() }
-}, { timestamps: true })
+// Use the REAL User model rather than an inline copy. The inline schema had
+// already drifted (no `lowercase: true`, no comparePassword), so admins created
+// by this script behaved differently from users created by the API.
+//
+// IMPORTANT: the User schema hashes `password` in a pre('save') hook, so pass
+// the PLAINTEXT password to the constructor — hashing here would double-hash
+// and make the account impossible to log into.
+const User = require('../models/User')
 
-const User = mongoose.model('User', userSchema)
-
-// ── Admin credentials — change these! ───────────────────────
-const ADMIN_USERNAME = 'admin'
-const ADMIN_PASSWORD = 'Admin@12345'
+// ── Admin credentials come from .env — never hardcoded ──────────────────────
+// This file previously contained a hardcoded default admin password, committed
+// to the repository. Anyone with repo access (or the git history) knows it, so
+// treat it as compromised: pick a fresh ADMIN_PASSWORD and reset the existing
+// admin account via POST /api/admin/users/:id/reset-password.
+const ADMIN_USERNAME = requireEnv('ADMIN_USERNAME', { minLength: 3 })
+const ADMIN_PASSWORD = requireEnv('ADMIN_PASSWORD', { minLength: 8 })
 
 async function createAdmin() {
   console.log('Connecting to MongoDB...')
-  console.log('URI:', process.env.MONGODB_URI ? 'Found ✅' : 'MISSING ❌')
-
-  if (!process.env.MONGODB_URI) {
-    console.error('❌ MONGODB_URI not found in .env file')
-    console.error('Make sure your .env file exists in the backend folder')
-    process.exit(1)
-  }
 
   try {
-    await mongoose.connect(process.env.MONGODB_URI)
-    console.log('✅ Connected to MongoDB')
+    await mongoose.connect(MONGODB_URI)
+    console.log('\u2705 Connected to MongoDB')
 
-    // Check if admin exists
-    const existing = await User.findOne({ username: ADMIN_USERNAME })
+    const normalizedName = ADMIN_USERNAME.trim().toLowerCase()
+
+    const existing = await User.findOne({ username: normalizedName })
     if (existing) {
-      console.log('⚠️  Admin user already exists!')
+      console.log('\u26A0\uFE0F  Admin user already exists!')
       console.log(`   Username: ${existing.username}`)
       console.log(`   isAdmin:  ${existing.isAdmin}`)
+      if (!existing.isAdmin) {
+        console.log('   Promoting existing account to admin...')
+        existing.isAdmin = true
+        await existing.save()
+        console.log('   \u2705 Promoted.')
+      }
       await mongoose.disconnect()
       process.exit(0)
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12)
-
-    // Create admin
-    const admin = new User({
-      username: ADMIN_USERNAME,
-      password: hashedPassword,
+    const admin = await User.create({
+      username: normalizedName,
+      password: ADMIN_PASSWORD, // hashed by the schema's pre('save') hook
       isAdmin:  true,
       coins:    999999999
     })
-    await admin.save()
 
     console.log('')
-    console.log('🎉 Admin created successfully!')
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    console.log(`   Username: ${ADMIN_USERNAME}`)
-    console.log(`   Password: ${ADMIN_PASSWORD}`)
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    console.log('⚠️  Save these credentials safely!')
+    console.log('\uD83C\uDF89 Admin created successfully!')
+    console.log('\u2501'.repeat(32))
+    console.log(`   Username: ${admin.username}`)
+    // The password is deliberately NOT echoed. It lives in .env; printing it
+    // copies a live credential into shell history, CI logs and log aggregators.
+    console.log('   Password: (set via ADMIN_PASSWORD in .env)')
+    console.log('\u2501'.repeat(32))
     console.log('')
 
     await mongoose.disconnect()
     process.exit(0)
 
   } catch (err) {
-    console.error('❌ Error creating admin:', err.message)
-    await mongoose.disconnect()
+    console.error('\u274C Error creating admin:', err.message)
+    await mongoose.disconnect().catch(() => {})
     process.exit(1)
   }
 }

@@ -1,57 +1,76 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-import axios from 'axios'
-
-// Set base URL
-axios.defaults.baseURL = 'http://localhost:5000/api'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { authAPI, getToken, setToken, clearToken } from '../services/api'
+import { captureReferralCode, clearPendingReferralCode } from '../utils/referralCapture'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Seed from storage so the "no session" path doesn't need a synchronous
+  // setLoading(false) inside the effect (which cascades an extra render).
+  const [loading, setLoading] = useState(() => Boolean(getToken()))
 
+  // Capture a referral code before anything else, including on the login page.
   useEffect(() => {
-    const token =
-      localStorage.getItem('ls_token') ||
-      sessionStorage.getItem('ls_token')
-
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-      fetchProfile()
-    } else {
-      setLoading(false)
-    }
+    captureReferralCode()
   }, [])
 
-  const fetchProfile = async () => {
+  const logout = useCallback(() => {
+    setUser(null)
+    clearToken()
+    clearPendingReferralCode()
+  }, [])
+
+  const fetchProfile = useCallback(async () => {
     try {
-      const res = await axios.get('/auth/profile')
+      const res = await authAPI.profile()
       setUser(res.data)
+      return res.data
     } catch {
       logout()
-    } finally {
-      setLoading(false)
+      return null
     }
-  }
+  }, [logout])
 
+  // Restore a persisted session on boot.
+  useEffect(() => {
+    const token = getToken()
+    if (!token) return // `loading` was already initialised to false
+
+    // No global axios header is set here any more — services/api.js attaches the
+    // Authorization header per-request via its interceptor, so the token can
+    // change (login/logout) without mutating shared axios state.
+    let cancelled = false
+
+    authAPI.profile()
+      .then(res => { if (!cancelled) setUser(res.data) })
+      .catch(() => { if (!cancelled) logout() })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
+  }, [logout])
+
+  /**
+   * @returns the user object on success, so callers can branch on isAdmin.
+   * @throws the axios error on failure (the login form reads
+   *         err.response.data.message).
+   */
   const login = async (username, password, remember = false) => {
-    const res = await axios.post('/auth/login', { username, password })
+    const res = await authAPI.login(username, password)
     const { token, user: u } = res.data
-    setUser(u)
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
-    if (remember) {
-      localStorage.setItem('ls_token', token)
-    } else {
-      sessionStorage.setItem('ls_token', token)
-    }
-    return u
-  }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem('ls_token')
-    sessionStorage.removeItem('ls_token')
-    delete axios.defaults.headers.common['Authorization']
+    setToken(token, remember)
+    setUser(u)
+
+    // Refetch the full profile so we also have `referredBy`, which the login
+    // response omits and the referral flow needs.
+    try {
+      const profile = await authAPI.profile()
+      setUser(profile)
+      return profile
+    } catch {
+      return u
+    }
   }
 
   return (

@@ -1,3 +1,29 @@
-backend/node_modules/
+# ── Dependencies ────────────────────────────────────────────────────────────
 node_modules/
 **/node_modules/
+
+# ── Secrets ─────────────────────────────────────────────────────────────────
+# Environment files hold live credentials (Mongo URI, JWT_SECRET, admin
+# password, VAPID private key). Never commit them — use the .env.example
+# templates instead.
+.env
+**/.env
+.env.local
+.env.*.local
+!.env.example
+!**/.env.example
+
+# ── Build output ────────────────────────────────────────────────────────────
+dist/
+build/
+**/dist/
+
+# ── Logs ────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+logs/
+
+# ── Editor / OS ─────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/

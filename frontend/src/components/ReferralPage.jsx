@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion }              from 'framer-motion'
 import { Copy, Share2, Users } from 'lucide-react'
-import axios                   from 'axios'
+import { referralAPI }          from '../services/api'
 import { useAuth }             from '../context/AuthContext'
 
 export default function ReferralPage() {
@@ -12,7 +12,7 @@ export default function ReferralPage() {
   const referralLink = `${window.location.origin}?ref=${user?.referralCode || ''}`
 
   useEffect(() => {
-    axios.get('/referral/stats')
+    referralAPI.getStats()
       .then(r => setStats(r.data))
       .catch(console.error)
   }, [])

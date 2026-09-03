@@ -1,5 +1,6 @@
 import { useState }     from 'react'
-import { useNavigate }  from 'react-router-dom'
+import { useNavigate,
+         useSearchParams } from 'react-router-dom'
 import { motion }       from 'framer-motion'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
 import { useAuth }      from '../context/AuthContext'
@@ -7,6 +8,7 @@ import { useAuth }      from '../context/AuthContext'
 export default function LoginPage() {
   const { login }               = useAuth()
   const navigate                = useNavigate()
+  const [searchParams]          = useSearchParams()
   const [form, setForm]         = useState({ username: '', password: '', remember: false })
   const [showPass, setShowPass] = useState(false)
   const [error, setError]       = useState('')
@@ -18,10 +20,19 @@ export default function LoginPage() {
     setError('')
     try {
       const user = await login(form.username, form.password, form.remember)
-      if (user.isAdmin) {
+
+      // Honour ?next= set by the API interceptor when a token expires, so the
+      // user lands back where they were instead of always on the home page.
+      // Restricted to same-origin paths to avoid an open redirect.
+      const rawNext = searchParams.get('next')
+      const safeNext = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
+        ? rawNext
+        : null
+
+      if (user?.isAdmin) {
         navigate('/admin', { replace: true })
       } else {
-        navigate('/', { replace: true })
+        navigate(safeNext || '/', { replace: true })
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid credentials')

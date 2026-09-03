@@ -16,7 +16,9 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type:    String,
-    enum:    ['bonus', 'referral', 'system'],
+    // 'rain' is emitted by POST /api/admin/rain — it must be a legal value or
+    // every coin-rain notification fails validation and is silently dropped.
+    enum:    ['bonus', 'referral', 'rain', 'system'],
     default: 'system'
   },
   read: {

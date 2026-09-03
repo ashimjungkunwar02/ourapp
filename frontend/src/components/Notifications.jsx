@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, X } from 'lucide-react'
-import axios from 'axios'
+import { gameAPI } from '../services/api'
 
 export default function Notifications() {
   const [notifs, setNotifs] = useState([])
@@ -16,7 +16,7 @@ export default function Notifications() {
 
   const fetchNotifs = async () => {
     try {
-      const res = await axios.get('/game/notifications')
+      const res = await gameAPI.getNotifications()
       setNotifs(res.data)
       setUnread(res.data.filter(n => !n.read).length)
     } catch {}
@@ -24,7 +24,7 @@ export default function Notifications() {
 
   const markRead = async (id) => {
     try {
-      await axios.post(`/game/notifications/${id}/read`)
+      await gameAPI.markNotificationRead(id)
       setNotifs(prev =>
         prev.map(n => n._id === id ? { ...n, read: true } : n)
       )

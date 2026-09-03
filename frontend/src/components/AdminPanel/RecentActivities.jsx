@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
+import { adminAPI } from '../../services/api'
 
 export default function RecentActivities() {
   const [activities, setActivities] = useState([])
@@ -13,7 +13,7 @@ export default function RecentActivities() {
 
   const fetchActivities = async () => {
     try {
-      const res = await axios.get('/admin/activities')
+      const res = await adminAPI.getActivities()
       setActivities(res.data)
     } catch (err) {
       console.error(err)

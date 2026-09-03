@@ -7,7 +7,11 @@ const userSchema = new mongoose.Schema(
       type:     String,
       required: true,
       unique:   true,
-      trim:     true
+      trim:     true,
+      // Normalise on write AND on query-cast. Without this, an account created
+      // as "Alice" is unreachable by logging in as "alice" (and vice versa),
+      // and two users can hold the same name in different cases.
+      lowercase: true
     },
     password: {
       type:     String,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion }              from 'framer-motion'
-import axios                   from 'axios'
+import { adminAPI }            from '../../services/api'
 
 function BarChart({ data = [], color = '#22c55e', label }) {
   const max = Math.max(...data.map(d => d.value), 1)
@@ -46,7 +46,7 @@ export default function MetricsDashboard() {
 
   const fetchMetrics = async () => {
     try {
-      const res = await axios.get(`/admin/metrics?range=${range}`)
+      const res = await adminAPI.getMetrics(range)
       setMetrics(res.data)
     } catch (err) {
       console.error(err)

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import axios from 'axios'
+import { adminAPI } from '../../services/api'
 
 const PRESETS = [40, 50, 60, 69]
 
@@ -15,7 +15,7 @@ export default function BonusProgram() {
   const launch = async () => {
     setLoading(true)
     try {
-      await axios.post('/admin/bonus/launch', {
+      await adminAPI.launchBonus({
         type:       mode,
         percentage: Number(percent),
         validHours: Number(hours),

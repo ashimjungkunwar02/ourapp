@@ -12,7 +12,8 @@ const activitySchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['spin', 'claim', 'login', 'bonus', 'referral', 'win', 'admin'],
+    // 'rain' is logged by POST /api/admin/rain.
+    enum: ['spin', 'claim', 'login', 'bonus', 'referral', 'win', 'rain', 'admin'],
     default: 'login'
   },
   description: {

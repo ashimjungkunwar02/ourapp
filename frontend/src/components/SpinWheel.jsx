@@ -4,7 +4,7 @@ import { Volume2, VolumeX }                         from 'lucide-react'
 import { buildFullWheel }                           from '../utils/wheelConfig'
 import { soundEngine }                              from '../utils/soundEngine'
 import { haptics }                                  from '../utils/haptics'
-import axios                                        from 'axios'
+import { gameAPI }                                   from '../services/api'
 
 const SEGMENTS = buildFullWheel()
 const TOTAL    = SEGMENTS.length
@@ -95,16 +95,48 @@ export default function SpinWheel({ coins, onCoinsUpdate }) {
     haptics.medium()
 
     try {
-      const res     = await axios.post('/game/spin')
+      const res     = await gameAPI.spin()
       const outcome = res.data.result
       onCoinsUpdate(res.data.newBalance)
 
-      const segIdx        = SEGMENTS.findIndex(s => s.id === outcome.id)
-      const segAngle      = segIdx * ARC
-      const fullRotations = (5 + Math.floor(Math.random() * 4)) * 2 * Math.PI
-      const targetRot     = fullRotations + (2 * Math.PI - segAngle)
+      const TAU = 2 * Math.PI
 
-      const startRot  = rotationRef.current
+      // Locate the winning segment on the drawn wheel.
+      let segIdx = SEGMENTS.findIndex(s => s.id === outcome.id)
+      if (segIdx === -1) {
+        // Server outcome isn't on the client wheel (config drift). Land on a
+        // filler segment rather than crashing the animation.
+        console.warn(`[wheel] outcome id ${outcome.id} not found on wheel`)
+        segIdx = 0
+      }
+
+      // drawWheel() places segment i over
+      //   [rot + i*ARC - PI/2 , rot + (i+1)*ARC - PI/2]
+      // and the pointer sits at the top (-PI/2). For the segment CENTRE to line
+      // up with the pointer we need:
+      //   rot + (i + 0.5)*ARC  ===  0   (mod 2*PI)
+      //   rot                  ===  2*PI - (i + 0.5)*ARC
+      //
+      // Two bugs fixed here:
+      //  1. It used `segIdx * ARC`, landing on the segment's leading EDGE
+      //     instead of its centre — so the pointer sat on the divider between
+      //     the real result and its neighbour.
+      //  2. It computed the target as an absolute angle and added it to the
+      //     CURRENT rotation, so every spin after the first was off by whatever
+      //     rotation had already accumulated. Normalising modulo 2*PI and
+      //     always moving forward fixes both.
+      const desiredFinal = ((TAU - (segIdx + 0.5) * ARC) % TAU + TAU) % TAU
+      const startRot     = rotationRef.current
+      const currentMod   = ((startRot % TAU) + TAU) % TAU
+
+      let delta = desiredFinal - currentMod
+      if (delta <= 0) delta += TAU
+
+      // 5-8 whole extra turns purely for visual effect; they don't change where
+      // the wheel stops because each is an exact multiple of 2*PI.
+      const extraSpins = (5 + Math.floor(Math.random() * 4)) * TAU
+      const targetRot  = extraSpins + delta
+
       const endRot    = startRot + targetRot
       const duration  = 5500
       const startTime = performance.now()

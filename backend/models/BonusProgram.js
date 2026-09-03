@@ -13,8 +13,14 @@ const bonusProgramSchema = new mongoose.Schema({
     max:      500
   },
   message: {
-    type:     String,
-    required: true
+    type: String,
+    // Not `required: true`: admins routinely launch a bonus without typing
+    // custom copy, and a hard requirement made the whole launch 500. The route
+    // derives a sensible default when the field is omitted, so the value is
+    // always a non-empty string by the time it reaches the DB.
+    default: '',
+    trim: true,
+    maxlength: 500
   },
   validHours: {
     type:     Number,

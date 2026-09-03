@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion }              from 'framer-motion'
-import axios                   from 'axios'
+import { gameAPI }               from '../services/api'
 
 export default function CoinTimer({ onClaim }) {
   const [timeLeft, setTimeLeft] = useState(null)
@@ -30,7 +30,7 @@ export default function CoinTimer({ onClaim }) {
 
   const fetchStatus = async () => {
     try {
-      const res = await axios.get('/game/coin-status')
+      const res = await gameAPI.coinStatus()
       if (res.data.canClaim) {
         setCanClaim(true)
         setTimeLeft(0)
@@ -46,7 +46,7 @@ export default function CoinTimer({ onClaim }) {
   const handleClaim = async () => {
     setClaiming(true)
     try {
-      const res = await axios.post('/game/claim-coin')
+      const res = await gameAPI.claimCoin()
       onClaim(res.data.newBalance)
       setCanClaim(false)
       setTimeLeft(3600)

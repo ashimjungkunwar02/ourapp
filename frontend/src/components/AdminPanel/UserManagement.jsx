@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Plus, Minus, RotateCcw, Search } from 'lucide-react'
-import axios from 'axios'
+import { adminAPI } from '../../services/api'
 
 export default function UserManagement() {
   const [users,     setUsers]    = useState([])
@@ -16,7 +16,7 @@ export default function UserManagement() {
   const fetchUsers = async () => {
     setLoading(true)
     try {
-      const res = await axios.get('/admin/users')
+      const res = await adminAPI.getUsers()
       setUsers(res.data)
     } catch (err) {
       console.error(err)
@@ -32,7 +32,7 @@ export default function UserManagement() {
 
   const createUser = async () => {
     try {
-      await axios.post('/admin/users/create', newUser)
+      await adminAPI.createUser(newUser.username, newUser.password)
       showFeedback('✅ User created successfully!')
       setNewUser({ username: '', password: '' })
       fetchUsers()
@@ -44,9 +44,7 @@ export default function UserManagement() {
   const adjustPoints = async (userId, amount, type) => {
     if (!amount) return
     try {
-      await axios.post(`/admin/users/${userId}/points`, {
-        amount: Number(amount), type
-      })
+      await adminAPI.adjustPoints(userId, Number(amount), type)
       showFeedback(`✅ Points ${type === 'add' ? 'added' : 'deducted'}!`)
       fetchUsers()
     } catch {
@@ -58,7 +56,7 @@ export default function UserManagement() {
     const password = passMap[userId]
     if (!password) return
     try {
-      await axios.post(`/admin/users/${userId}/reset-password`, { password })
+      await adminAPI.resetPassword(userId, password)
       showFeedback('✅ Password reset successfully!')
       setPassMap({ ...passMap, [userId]: '' })
     } catch {

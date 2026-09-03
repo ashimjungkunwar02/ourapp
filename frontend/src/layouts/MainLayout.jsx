@@ -8,6 +8,7 @@ import Notifications                  from '../components/Notifications'
 import RainEffect                     from '../components/RainEffect'
 import PushPermissionBanner           from '../components/PushPermissionBanner'
 import { useSocket }                  from '../hooks/useSocket'
+import { useReferral }                 from '../hooks/useReferral'
 import { haptics }                    from '../utils/haptics'
 import { soundEngine }                from '../utils/soundEngine'
 
@@ -18,12 +19,23 @@ const NAV_ITEMS = [
 ]
 
 export default function MainLayout() {
-  const { user, logout }        = useAuth()
+  const { logout }              = useAuth()
   const navigate                = useNavigate()
   const location                = useLocation()
   const [rainActive,  setRainActive]  = useState(false)
   const [rainAmount,  setRainAmount]  = useState(0)
+  const [bonus,       setBonus]       = useState(null)
   const [isOnline,    setIsOnline]    = useState(navigator.onLine)
+
+  // Referral: consumes a ?ref= code captured at load / after login.
+  const { result: referralResult, dismiss: dismissReferral } = useReferral()
+
+  // Auto-dismiss the referral toast.
+  useEffect(() => {
+    if (!referralResult) return
+    const t = setTimeout(dismissReferral, 6000)
+    return () => clearTimeout(t)
+  }, [referralResult, dismissReferral])
 
   // Socket for real-time events
   useSocket({
@@ -32,6 +44,13 @@ export default function MainLayout() {
       setRainActive(true)
       soundEngine.rainSound()
       haptics.rain()
+    },
+    // Bonus launches were broadcast by the server but nothing listened, so
+    // admins saw "notified N users" while players saw nothing until a reload.
+    onBonus: (data) => {
+      setBonus(data)
+      soundEngine.rainSound?.()
+      haptics.medium?.()
     }
   })
 
@@ -77,6 +96,67 @@ export default function MainLayout() {
 
       {/* 🔔 Push Permission Banner */}
       <PushPermissionBanner />
+
+      {/* 🎁 Live bonus broadcast */}
+      {bonus && (
+        <div className="fixed top-16 left-4 right-4 z-[150] max-w-md mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: -40 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-[#111] border border-purple-500/40 rounded-2xl p-4
+                       shadow-2xl flex items-start gap-3"
+          >
+            <span className="text-2xl" aria-hidden="true">🎁</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-bold text-sm">
+                {bonus.percentage}% {bonus.type === 'deposit' ? 'Deposit' : 'Referral'} Bonus Live!
+              </p>
+              <p className="text-gray-400 text-xs break-words">
+                {bonus.message || `Valid for ${bonus.validHours} hours only!`}
+              </p>
+            </div>
+            <button
+              onClick={() => setBonus(null)}
+              aria-label="Dismiss"
+              className="text-gray-500 hover:text-white transition-colors shrink-0"
+            >
+              ✕
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* 👥 Referral code applied */}
+      {referralResult && (
+        <div className="fixed bottom-24 left-4 right-4 z-[150] max-w-md mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            className={`rounded-2xl p-4 shadow-2xl flex items-center gap-3
+                        ${referralResult.ok
+                          ? 'bg-[#111] border border-green-500/40'
+                          : 'bg-[#111] border border-red-500/40'}`}
+          >
+            <span className="text-2xl" aria-hidden="true">
+              {referralResult.ok ? '🎉' : '⚠️'}
+            </span>
+            <p className={`flex-1 text-sm font-medium
+                           ${referralResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {referralResult.ok
+                ? `Referral applied — you earned ${referralResult.coins} coins!`
+                : referralResult.message}
+            </p>
+            <button
+              onClick={dismissReferral}
+              aria-label="Dismiss"
+              className="text-gray-500 hover:text-white transition-colors shrink-0"
+            >
+              ✕
+            </button>
+          </motion.div>
+        </div>
+      )}
 
       {/* ── Top Navigation Bar ───────────────────────────────────── */}
       <header className="bg-[#111] border-b border-gray-800 px-4 py-3
