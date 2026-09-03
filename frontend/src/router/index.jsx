@@ -20,6 +20,10 @@ import NotFoundPage from '../pages/NotFoundPage'
 // migration didn't silently drop it and orphan the component.
 import SplashScreen from '../components/SplashScreen'
 
+// Setup guard: shown when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are absent.
+import SetupErrorPage from '../pages/SetupErrorPage'
+import { isSupabaseConfigured } from '../services/supabase'
+
 // SplashScreen owns its own 3s timer and calls onFinish when it elapses.
 const SPLASH_KEY = 'ls_splash_seen'
 
@@ -91,6 +95,12 @@ export default function AppRouter() {
   const finishSplash = () => {
     try { sessionStorage.setItem(SPLASH_KEY, 'true') } catch { /* private mode */ }
     setShowSplash(false)
+  }
+
+  // No Supabase credentials -> nothing in the app can work. Show the setup
+  // guide instead of a login form that fails with an opaque 503.
+  if (!isSupabaseConfigured) {
+    return <SetupErrorPage />
   }
 
   return (

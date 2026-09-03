@@ -47,6 +47,8 @@ self.addEventListener('activate', event => {
 })
 
 // ── Should this request be handled by the cache at all? ─────────────────────
+// Legacy Express paths. Harmless to keep: on the Supabase/Cloudflare build the
+// API is cross-origin and already excluded by the origin check below.
 const isApiRequest = (url) =>
   url.pathname.startsWith('/api/') || url.pathname === '/api'
 
@@ -61,8 +63,9 @@ const isCacheable = (request, url) => {
   // from cache indefinitely, and 401s got cached as if they were content.
   if (isApiRequest(url)) return false
 
-  // Socket.io polling transport — must never be cached or short-circuited.
-  if (url.pathname.startsWith('/socket.io')) return false
+  // Supabase (REST, auth, Edge Functions) lives on a different origin, and
+  // Realtime runs over websockets which a SW never sees. The origin check
+  // below already excludes both — nothing to cache here.
 
   // Only cache same-origin static assets.
   if (url.origin !== self.location.origin) return false

@@ -1,80 +1,111 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { authAPI, getToken, setToken, clearToken } from '../services/api'
+import { authAPI } from '../services/api'
+import { supabase, isSupabaseConfigured } from '../services/supabase'
 import { captureReferralCode, clearPendingReferralCode } from '../utils/referralCapture'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null)
-  // Seed from storage so the "no session" path doesn't need a synchronous
-  // setLoading(false) inside the effect (which cascades an extra render).
-  const [loading, setLoading] = useState(() => Boolean(getToken()))
+  // Start "loading" only when there is a configured client whose session we
+  // still have to read; otherwise the app would hang on a spinner forever.
+  const [loading, setLoading] = useState(() => isSupabaseConfigured)
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const res = await authAPI.profile()
+      setUser(res.data)
+      return res.data
+    } catch {
+      setUser(null)
+      return null
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   // Capture a referral code before anything else, including on the login page.
   useEffect(() => {
     captureReferralCode()
   }, [])
 
-  const logout = useCallback(() => {
-    setUser(null)
-    clearToken()
-    clearPendingReferralCode()
-  }, [])
-
-  const fetchProfile = useCallback(async () => {
-    try {
-      const res = await authAPI.profile()
-      setUser(res.data)
-      return res.data
-    } catch {
-      logout()
-      return null
-    }
-  }, [logout])
-
-  // Restore a persisted session on boot.
   useEffect(() => {
-    const token = getToken()
-    if (!token) return // `loading` was already initialised to false
+    // `loading` is initialised from isSupabaseConfigured, so when there is no
+    // client it is ALREADY false. Returning without touching state avoids a
+    // synchronous setState in the effect body (cascading render).
+    if (!supabase) return
 
-    // No global axios header is set here any more — services/api.js attaches the
-    // Authorization header per-request via its interceptor, so the token can
-    // change (login/logout) without mutating shared axios state.
     let cancelled = false
 
-    authAPI.profile()
-      .then(res => { if (!cancelled) setUser(res.data) })
-      .catch(() => { if (!cancelled) logout() })
-      .finally(() => { if (!cancelled) setLoading(false) })
+    // Read the persisted session once on boot. Do NOT call getSession() from
+    // inside onAuthStateChange — that is a documented Supabase deadlock.
+    supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return
+      if (data.session) loadProfile()
+      else              setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
 
-    return () => { cancelled = true }
-  }, [logout])
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return
+
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+        setLoading(false)
+        return
+      }
+      if (session?.user) {
+        // Re-read the profile so coins/streak/isAdmin stay current after a
+        // token refresh or a sign-in from another tab.
+        loadProfile()
+      } else {
+        setUser(null)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+      sub.subscription.unsubscribe()
+    }
+  }, [loadProfile])
+
+  const logout = useCallback(async () => {
+    clearPendingReferralCode()
+    setUser(null)
+    try {
+      await authAPI.logout()
+    } catch {
+      // Even if the server call fails, the local session is cleared below by
+      // Supabase's SIGNED_OUT event; don't strand the user.
+    }
+  }, [])
 
   /**
-   * @returns the user object on success, so callers can branch on isAdmin.
-   * @throws the axios error on failure (the login form reads
-   *         err.response.data.message).
+   * @returns the profile object so callers can branch on isAdmin.
+   * @throws ApiError with `.response.data.message` on failure.
    */
-  const login = async (username, password, remember = false) => {
-    const res = await authAPI.login(username, password)
-    const { token, user: u } = res.data
+  const login = useCallback(async (username, password, remember = false) => {
+    const res  = await authAPI.login(username, password, remember)
+    const user = res.data.user
+    setUser(user)
+    return user
+  }, [])
 
-    setToken(token, remember)
-    setUser(u)
-
-    // Refetch the full profile so we also have `referredBy`, which the login
-    // response omits and the referral flow needs.
-    try {
-      const profile = await authAPI.profile()
-      setUser(profile)
-      return profile
-    } catch {
-      return u
-    }
-  }
+  const fetchProfile = useCallback(() => loadProfile(), [loadProfile])
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, fetchProfile }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        fetchProfile,
+        // Lets the UI show a clear setup message instead of a login form that
+        // can never succeed when the env vars are missing.
+        configured: isSupabaseConfigured
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

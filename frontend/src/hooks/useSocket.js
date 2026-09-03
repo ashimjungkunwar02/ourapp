@@ -1,102 +1,116 @@
 import { useEffect, useRef } from 'react'
-import { getToken } from '../services/api'
+import { supabase, isSupabaseConfigured } from '../services/supabase'
 
-// ─── Socket URL ──────────────────────────────────────────────────────────────
-// Was hardcoded to 'http://localhost:5000', which broke every deployed build.
-// Falls back to the current page origin so a same-origin deploy needs no config.
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ||
-  (typeof window !== 'undefined' ? window.location.origin : undefined)
+// ══════════════════════════════════════════════════════════════════════════
+// Realtime live events (replaces the old Socket.io client).
+//
+// Same call signature — `useSocket({ onRain, onBonus })` — so nothing else in
+// the app changed. Supabase Realtime streams INSERTs on the `live_events`
+// table over websockets; the Postgres functions write those rows whenever an
+// admin makes it rain or launches a bonus.
+//
+// RLS: reads are allowed for authenticated users, so the channel is only
+// subscribed once a session exists. It re-subscribes automatically if the
+// session changes.
+// ══════════════════════════════════════════════════════════════════════════
 
-/**
- * Realtime connection to the API.
- *
- * AUTH: the token is sent in the handshake. The server verifies it and joins the
- * socket to a room derived from the VERIFIED identity, so a client can never
- * subscribe to another user's room by passing a different userId.
- *
- * The 'join' event is still emitted for compatibility, but the server ignores
- * any client-supplied payload and uses the authenticated id.
- */
-export function useSocket({ onRain, onBonus, onAuthenticated } = {}) {
-  const socketRef = useRef(null)
-
-  // Keep the latest callbacks without re-creating the socket on every render.
-  // With a `[]` dependency array the effect captured the first-render closures
-  // forever, so handlers saw stale state.
-  const handlersRef = useRef({ onRain, onBonus, onAuthenticated })
-  useEffect(() => {
-    handlersRef.current = { onRain, onBonus, onAuthenticated }
-  }, [onRain, onBonus, onAuthenticated])
-
-  const token = getToken()
+export const useSocket = ({ onRain, onBonus }) => {
+  // Handlers are captured in refs so re-rendering the parent does not tear
+  // down and rebuild the websocket on every render.
+  const onRainRef  = useRef(onRain)
+  const onBonusRef = useRef(onBonus)
+  useEffect(() => { onRainRef.current  = onRain },  [onRain])
+  useEffect(() => { onBonusRef.current = onBonus }, [onBonus])
 
   useEffect(() => {
-    // No token == not logged in; don't open a socket that will only be rejected.
-    if (!token) return
+    if (!supabase || !isSupabaseConfigured) return
 
     let cancelled = false
-    let socket    = null
+    let channel   = null
+    const seen    = new Set() // de-dupe: Realtime can deliver twice on reconnect
 
-    import('socket.io-client')
-      .then(({ io }) => {
-        if (cancelled) return
+    const handle = (row) => {
+      if (!row) return
+      if (row.id != null) {
+        if (seen.has(row.id)) return
+        seen.add(row.id)
+        // Keep the de-dupe set from growing unbounded on a long-lived tab.
+        if (seen.size > 500) seen.clear()
+      }
 
-        socket = io(SOCKET_URL, {
-          transports: ['websocket', 'polling'],
-          auth: { token },
-          reconnection: true,
-          reconnectionAttempts: Infinity,
-          reconnectionDelay: 1000,
-          reconnectionDelayMax: 10000
-        })
-        socketRef.current = socket
+      const payload = row.payload ?? {}
 
-        socket.on('connect', () => {
-          // Emitted for parity with the original client contract. The server
-          // derives the room from the verified JWT, not from this payload.
-          socket.emit('join')
-        })
+      switch (row.event) {
+        case 'make_it_rain':
+          // Shape matches what the CoinRain component already expects.
+          onRainRef.current?.({
+            amount:    payload.amount    ?? 0,
+            adminName: payload.adminName ?? 'Admin',
+            event:     'make_it_rain'
+          })
+          break
 
-        socket.on('authenticated', (data) => {
-          handlersRef.current.onAuthenticated?.(data)
-        })
+        case 'bonus_launched':
+          onBonusRef.current?.({
+            type:       payload.type,
+            percentage: payload.percentage,
+            validHours: payload.validHours,
+            message:    payload.message,
+            endsAt:     payload.endsAt,
+            event:      'bonus_launched'
+          })
+          break
 
-        socket.on('rain_event', (data) => {
-          handlersRef.current.onRain?.(data)
-        })
+        default:
+          break
+      }
+    }
 
-        socket.on('bonus_notification', (data) => {
-          handlersRef.current.onBonus?.(data)
-        })
+    const connect = () => {
+      if (cancelled) return
 
-        socket.on('connect_error', (err) => {
-          // The server rejects unauthenticated handshakes with this message.
-          if (/authentication/i.test(err?.message || '')) {
-            console.warn('[socket] rejected — token invalid or expired')
-          } else {
-            console.warn('[socket] connect_error:', err?.message)
+      channel = supabase
+        .channel('live-events', { config: { broadcast: { self: false } } })
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'live_events' },
+          (payload) => handle(payload.new)
+        )
+        .subscribe((status) => {
+          // Surface channel problems in dev without breaking production UX.
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('[realtime] live_events channel:', status)
           }
         })
+    }
 
-        socket.on('disconnect', (reason) => {
-          console.log('[socket] disconnected:', reason)
-        })
-      })
-      .catch(err => {
-        console.log('[socket] client unavailable:', err.message)
-      })
+    // Only subscribe once there is a session — anon has no read access, so the
+    // channel would just error.
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled && data.session) connect()
+    }).catch(() => { /* no session yet */ })
+
+    // Re-subscribe when the user signs in/out.
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return
+      if (session) {
+        if (!channel) connect()
+      } else if (channel) {
+        supabase.removeChannel(channel)
+        channel = null
+        seen.clear()
+      }
+    })
 
     return () => {
       cancelled = true
-      if (socket) {
-        socket.removeAllListeners()
-        socket.disconnect()
+      if (channel) {
+        supabase.removeChannel(channel)
+        channel = null
       }
-      socketRef.current = null
+      sub.subscription.unsubscribe()
     }
-    // Reconnect when the token changes (login/logout), not on every render.
-  }, [token])
-
-  return socketRef
+  }, [])
 }
+
+export default useSocket
