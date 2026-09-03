@@ -1,0 +1,71 @@
+# ── Supabase project configuration ─────────────────────────────────────────
+# Used by the Supabase CLI for local development (`supabase start`,
+# `supabase functions serve`) and as the source of truth for
+# `supabase db push` / `supabase functions deploy`.
+#
+# Kept deliberately minimal: every key omitted here falls back to the CLI's
+# own defaults, which avoids this file breaking when the CLI is upgraded.
+#
+# The `project_id` below is only a LOCAL identifier. Linking to a real hosted
+# project is done separately with:
+#   supabase link --project-ref <your-project-ref>
+
+project_id = "lisa-sweeps"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+# Caps how many rows a single PostgREST select can return. The admin user list
+# is paginated in SQL, so this is a safety net rather than a functional limit.
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.migrations]
+# Migrations live in supabase/migrations and are applied in filename order.
+schema_paths = []
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["https://localhost", "capacitor://localhost"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = false          # accounts are created by an admin only
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+
+# The app signs users in with a SYNTHETIC email derived from their username
+# (username@auth.lisasweeps.internal), so email delivery is irrelevant and
+# confirming addresses would lock everyone out.
+[auth.email.template.confirmation]
+subject = "Lisa Sweeps access"
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+
+# ── Edge Functions ─────────────────────────────────────────────────────────
+# verify_jwt = true means the runtime rejects calls that do not carry a valid
+# project JWT. Both functions additionally perform their own authorization:
+#   admin-manage-user -> caller must be an admin (checked against profiles)
+#   send-push         -> caller must present the service_role key exactly
+# so a valid anon JWT alone is never enough.
+[functions.admin-manage-user]
+verify_jwt = true
+
+[functions.send-push]
+verify_jwt = true
