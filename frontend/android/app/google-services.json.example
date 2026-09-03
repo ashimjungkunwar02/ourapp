@@ -1,0 +1,54 @@
+{
+  "_README": [
+    "TEMPLATE ONLY — this file is not used by the build and is deliberately named",
+    "google-services.json.example so Gradle ignores it.",
+    "",
+    "To enable Firebase Cloud Messaging push notifications:",
+    "  1. https://console.firebase.google.com -> Add project (e.g. 'lisa-sweeps').",
+    "  2. Add an ANDROID app with package name exactly: com.lisasweeps.app",
+    "     (must match capacitor.config.json appId / app/build.gradle applicationId,",
+    "      otherwise FCM returns SENDER_ID_MISMATCH and no token is ever issued).",
+    "  3. Skip the debug SHA-1 prompt unless you use Firebase Auth.",
+    "  4. Download google-services.json and save it at:",
+    "       frontend/android/app/google-services.json",
+    "  5. In the same project, Project settings -> Service accounts ->",
+    "     'Generate new private key'. Give that JSON to Supabase as a secret so the",
+    "     send-push Edge Function can fan out:",
+    "       supabase secrets set FCM_SERVICE_ACCOUNT_JSON='$(cat service-account.json)'",
+    "  6. Rebuild: npm run build:android",
+    "",
+    "Without this file the APK still builds and runs normally — app/build.gradle",
+    "applies the google-services plugin only when the file exists. Push simply",
+    "stays unavailable and the in-app banner reports so.",
+    "",
+    "The values below are the SHAPE of the real file with every credential",
+    "replaced. Do not paste real keys into this template."
+  ],
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "lisa-sweeps-REPLACE_ME",
+    "storage_bucket": "lisa-sweeps-REPLACE_ME.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "com.lisasweeps.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "REPLACE_WITH_ANDROID_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

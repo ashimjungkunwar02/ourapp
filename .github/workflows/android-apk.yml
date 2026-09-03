@@ -1,0 +1,239 @@
+name: Android APK
+
+# Builds an installable Android APK for Lisa Sweeps.
+#
+# Triggers:
+#   * push of a `v*` tag      -> release APK + GitHub Release with the file attached
+#   * manual workflow_dispatch -> choose debug (installable, unsigned-by-us) or release
+#
+# Why CI and not a local build: the APK needs JDK 17+, the Android SDK and
+# Gradle. ubuntu-latest runners have all three, so a contributor only needs to
+# push a tag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Build variant'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+# Needed to create the GitHub Release and attach the APK.
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Public by design — these are baked into the JS bundle at build time, exactly
+  # like VITE_API_URL was before. The anon key is protected by Row Level
+  # Security, NOT by secrecy. Set both as repo secrets so they are not committed.
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+  # Never commit the service_role key. It is only used by Edge Functions and is
+  # read here solely to fail loudly if someone wired it into the frontend.
+  NODE_VERSION: '22'
+  JAVA_VERSION: '21'
+
+jobs:
+  build:
+    name: Build APK (${{ github.event_name == 'push' && 'release' || inputs.variant }})
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          # Caches ~/.gradle between runs; the first build still downloads the
+          # whole dependency tree (~3-5 min), later ones are much faster.
+          cache: gradle
+
+      - name: Set up Android SDK
+        # Installs cmdline-tools, accepts licences and provisions
+        # platforms;android-36 + build-tools so AGP 8.13 resolves offline.
+        uses: android-actions/setup-android@v3
+
+      - name: Install required SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools"
+
+      - name: Verify Supabase env is present
+        # Failing here gives a clear message instead of a black screen in the
+        # finished app ("Supabase is not configured").
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY."
+            echo "Add them under repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          case "$VITE_SUPABASE_URL" in
+            https://*.supabase.co) : ;;
+            *) echo "::warning::VITE_SUPABASE_URL does not look like https://<ref>.supabase.co" ;;
+          esac
+
+      - name: Guard against leaked service_role key
+        run: |
+          # A genuine Supabase service key is a JWT whose payload contains
+          # "role":"service_role". Match that, plus any VITE_-prefixed assignment
+          # of a service key. Prose in comments (e.g. "requires the service_role
+          # key") deliberately does NOT match, so this stays quiet.
+          if grep -rqE '"role"[[:space:]]*:[[:space:]]*"service_role"|VITE_[A-Z_]*SERVICE[_A-Z]*ROLE[[:space:]]*=' src/ .env* 2>/dev/null; then
+            echo "::error::A service_role credential was found in the frontend. It must never ship in the bundle."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Firebase (optional)
+        # Without GOOGLE_SERVICES_JSON the build still succeeds — Capacitor's
+        # app/build.gradle applies the google-services plugin conditionally.
+        # Push notifications are simply unavailable in that APK.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "FCM_ENABLED=true" >> "$GITHUB_ENV"
+            echo "::notice::google-services.json written — push notifications enabled"
+          else
+            echo "FCM_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::GOOGLE_SERVICES_JSON secret not set — building WITHOUT push"
+          fi
+
+      - name: Restore release keystore
+        # Only for release variants. The keystore is stored base64-encoded in a
+        # secret because binary files cannot be pasted into the Actions UI.
+        if: ${{ github.event_name == 'push' || inputs.variant == 'release' }}
+        env:
+          KS_BASE64:     ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASSWORD:   ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS:      ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEY_PASS:   ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_BASE64" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set — release APK will be UNSIGNED and cannot be installed."
+            exit 0
+          fi
+          mkdir -p android/keystore
+          printf '%s' "$KS_BASE64" | base64 -d > android/keystore/release.keystore
+
+          # Gradle resolves `storeFile` relative to frontend/android/app/ (the
+          # app module), not the repo root or the CI working directory. An
+          # absolute path removes all ambiguity about which of the three it is.
+          KS_ABS="$PWD/android/keystore/release.keystore"
+          cat > android/keystore.properties <<EOF
+          storeFile=$KS_ABS
+          storePassword=$KS_PASSWORD
+          keyAlias=$KS_ALIAS
+          keyPassword=$KS_KEY_PASS
+          EOF
+
+          # Fail early on a corrupt secret rather than at signing time.
+          if ! keytool -list -keystore android/keystore/release.keystore \
+               -storepass "$KS_PASSWORD" > /dev/null 2>&1; then
+            echo "::error::Keystore could not be opened — check ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD."
+            exit 1
+          fi
+          echo "SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Build web assets and sync Capacitor
+        run: npm run build:android
+
+      - name: Derive version from tag
+        if: github.event_name == 'push'
+        run: |
+          # v1.4.2 -> versionName 1.4.2, versionCode 10402 (monotonic per tag).
+          TAG="${GITHUB_REF_NAME#v}"
+          MAJOR=$(echo "$TAG" | cut -d. -f1); MINOR=$(echo "$TAG" | cut -d. -f2)
+          PATCH=$(echo "$TAG" | cut -d. -f3 | cut -d- -f1)
+          echo "ANDROID_VERSION_NAME=$TAG" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_CODE=$(( MAJOR * 10000 + ${MINOR:-0} * 100 + ${PATCH:-0} ))" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: |
+          VARIANT="${{ github.event_name == 'push' && 'Release' || (inputs.variant == 'release' && 'Release' || 'Debug') }}"
+          echo "Assembling $VARIANT"
+          cd android && ./gradlew --no-daemon "assemble$VARIANT"
+
+      - name: Locate and rename APK
+        id: apk
+        run: |
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then echo "::error::No APK produced"; exit 1; fi
+          VERSION="${ANDROID_VERSION_NAME:-${GITHUB_SHA::7}}"
+          VARIANT="${{ github.event_name == 'push' && 'release' || inputs.variant }}"
+          OUT="lisa-sweeps-${VERSION}-${VARIANT}.apk"
+          cp "$APK" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h "$OUT" | cut -f1)" >> "$GITHUB_OUTPUT"
+          # Surface the SHA-256 so a user can verify the download is intact.
+          echo "sha256=$(sha256sum "$OUT" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.path }}
+          path: frontend/${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: frontend/${{ steps.apk.outputs.path }}
+          generate_release_notes: true
+          body: |
+            ## Lisa Sweeps ${{ github.ref_name }}
+
+            **APK:** `${{ steps.apk.outputs.path }}` (${{ steps.apk.outputs.size }})
+            **SHA-256:** `${{ steps.apk.outputs.sha256 }}`
+            **Push notifications:** ${{ env.FCM_ENABLED == 'true' && 'enabled' || 'disabled (no google-services.json)' }}
+
+            ### Install
+            1. Download the APK above.
+            2. On the device, allow "Install unknown apps" for your browser.
+            3. Open the APK and install.
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Android build"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| APK | \`${{ steps.apk.outputs.path }}\` |"
+            echo "| Size | ${{ steps.apk.outputs.size }} |"
+            echo "| Push | ${{ env.FCM_ENABLED }} |"
+            echo "| Signed | ${{ env.SIGNING_ENABLED || 'false' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

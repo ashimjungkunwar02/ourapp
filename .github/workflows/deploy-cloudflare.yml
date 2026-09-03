@@ -1,0 +1,113 @@
+name: Deploy to Cloudflare Pages
+
+# Publishes the React bundle to Cloudflare Pages.
+#
+# This replaces hosting the frontend from Express. There is no Node process any
+# more — Pages serves static files and all data access goes straight from the
+# browser to Supabase, protected by Row Level Security.
+#
+# Required secrets (repo Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN     token with "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID    32-hex account id from the dashboard URL
+#   VITE_SUPABASE_URL        https://<ref>.supabase.co
+#   VITE_SUPABASE_ANON_KEY   the public anon JWT
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Pages branch to publish to'
+        required: true
+        default: 'production'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false   # let a deploy finish rather than half-uploading
+
+env:
+  NODE_VERSION: '22'
+  PAGES_PROJECT: lisa-sweeps
+
+jobs:
+  deploy:
+    name: Build & publish
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        # Non-blocking on purpose: the repo carries pre-existing lint debt, and
+        # failing a production deploy over a warning would be worse than the
+        # warning. Flip `continue-on-error` to false once the baseline is clean.
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_ORIGIN: ${{ secrets.VITE_APP_ORIGIN }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY secrets."
+            echo "The site would deploy but render 'Supabase is not configured'."
+            exit 1
+          fi
+          npm run build
+
+      - name: Verify Cloudflare routing files made it into dist
+        run: |
+          for f in _redirects _headers; do
+            if [ ! -f "dist/$f" ]; then
+              echo "::error::dist/$f missing — SPA deep links would 404 and security headers would not apply."
+              exit 1
+            fi
+          done
+          echo "OK: _redirects and _headers present"
+
+      - name: Publish to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # --commit-dirty: the checkout has no local changes, but wrangler
+          # refuses to publish from a directory it considers a dirty git tree
+          # (e.g. untracked dist/), which would fail every run.
+          command: >-
+            pages deploy frontend/dist
+            --project-name=${{ env.PAGES_PROJECT }}
+            --branch=${{ github.event_name == 'push' && 'main' || inputs.branch }}
+            --commit-dirty=true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Cloudflare Pages"
+            echo "Project: \`${{ env.PAGES_PROJECT }}\`"
+            echo "Branch: \`${{ github.event_name == 'push' && 'main' || inputs.branch }}\`"
+            echo "Deployment URL: ${{ steps.deploy.outputs.deployment-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

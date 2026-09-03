@@ -1,0 +1,44 @@
+# ── Cloudflare Pages security & caching headers ─────────────────────────────
+# Replaces the Express `helmet` middleware, which no longer runs anywhere:
+# the site is static, so these headers have to be set at the edge.
+#
+# NOTE: this file applies only to the Cloudflare Pages deployment. The Android
+# build loads the bundle from the device via Capacitor's local WebView and
+# never requests these paths, so a strict CSP here cannot break the APK.
+
+/*
+  # --- Hardening -----------------------------------------------------------
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+  # --- Content Security Policy ---------------------------------------------
+  # `connect-src 'self' https: wss:` covers any Supabase project URL (REST,
+  # GoTrue, Edge Functions over https and Realtime over wss) without baking the
+  # project ref into a committed file. Once deployed you SHOULD tighten this to
+  # your exact project, e.g.:
+  #   connect-src 'self' https://YOURREF.supabase.co wss://YOURREF.supabase.co
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+
+  # --- HSTS ----------------------------------------------------------------
+  # Cloudflare terminates TLS; 6 months without preload is a safe start.
+  # Enable `includeSubDomains` only once every subdomain is HTTPS.
+  Strict-Transport-Security: max-age=15552000
+
+# --- Long-lived caching for Vite's content-hashed assets -------------------
+# Filenames in /assets/* carry a build hash, so they are safe to cache forever.
+# index.html and sw.js deliberately get NO cache header here so a deploy is
+# picked up immediately.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+# The service worker must always be revalidated, or users can be pinned to a
+# stale shell for up to 24h (the browser's default SW update interval).
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate

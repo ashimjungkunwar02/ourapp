@@ -1,0 +1,92 @@
+apply plugin: 'com.android.application'
+
+// ── Release signing ────────────────────────────────────────────────────────
+// Credentials come from EITHER android/keystore.properties (local builds,
+// gitignored) OR the KS_* environment variables (CI). When neither exists the
+// release variant stays UNSIGNED: `assembleRelease` still succeeds and produces
+// an .apk that cannot be installed, which is the correct, non-fatal behaviour
+// for a contributor who has not set up signing yet. Debug builds are always
+// signed with the auto-generated ~/.android/debug.keystore.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def ksStoreFile = keystoreProperties['storeFile'] ?: System.getenv('KS_STORE_FILE')
+def releaseSigningEnabled = ksStoreFile != null && ksStoreFile.toString().trim() != ''
+
+android {
+    namespace = "com.lisasweeps.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.lisasweeps.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // CI bumps these from the git tag / workflow inputs without a commit.
+        versionCode Integer.parseInt(System.getenv('ANDROID_VERSION_CODE') ?: '1')
+        versionName System.getenv('ANDROID_VERSION_NAME') ?: '1.0'
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (releaseSigningEnabled) {
+            release {
+                storeFile     file(ksStoreFile)
+                storePassword keystoreProperties['storePassword'] ?: System.getenv('KS_STORE_PASSWORD')
+                keyAlias      keystoreProperties['keyAlias']      ?: System.getenv('KS_KEY_ALIAS')
+                keyPassword   keystoreProperties['keyPassword']   ?: System.getenv('KS_KEY_PASSWORD')
+                // v2/v3 signing is required for modern Android; enableV1Signing
+                // keeps the APK installable on API 24-27 devices.
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+    buildTypes {
+        release {
+            // Left disabled on purpose: R8 would need hand-written keep rules for
+            // every Capacitor plugin's reflection-based bridge, and a wrong rule
+            // fails only at runtime inside the WebView. Not worth the risk for
+            // the size saving here.
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseSigningEnabled) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/@capacitor/cli/schema.json",
+  "appId": "com.lisasweeps.app",
+  "appName": "Lisa Sweeps",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0b1020",
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#0b1020",
+      "androidSplashResourceName": "splash",
+      "splashFullScreen": true,
+      "splashImmersive": true,
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0b1020",
+      "overlaysWebView": false
+    },
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true,
+      "style": "DARK"
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alerts"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#f59e0b",
+      "sound": "default"
+    }
+  }
+}

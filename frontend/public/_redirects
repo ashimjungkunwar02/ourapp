@@ -1,0 +1,8 @@
+# ── Cloudflare Pages routing ────────────────────────────────────────────────
+# Single-page app: react-router owns /login, /game, /referral, /contact and
+# /admin. Without this, a hard refresh or a shared link on any deep route
+# returns 404 because there is no such file in the build output.
+#
+# Cloudflare Pages serves a matching static asset BEFORE applying these rules,
+# so /assets/*, /icons/*, /sw.js, /manifest.json etc. are unaffected.
+/*  /index.html  200
